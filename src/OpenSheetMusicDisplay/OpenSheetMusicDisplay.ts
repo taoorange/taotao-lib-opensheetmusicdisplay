@@ -93,6 +93,8 @@ export class OpenSheetMusicDisplay {
     protected autoResizeEnabled: boolean;
     protected resizeHandlerAttached: boolean;
     protected followCursor: boolean;
+    protected pagedPageSpacing: number = 8;
+    protected drawPageNumberAtFooter: boolean = true;
     /** A function that is executed when the XML has been read.
      * The return value will be used as the actual XML OSMD parses,
      * so you can make modifications to the xml that OSMD will use.
@@ -336,6 +338,7 @@ export class OpenSheetMusicDisplay {
         }
         // TODO width may need to be coordinated with render() where width is also used
         let height: number;
+        const pageFooterHeightPx: number = 24;
         const canvasDimensionsLimit: number = 32767; // browser limitation. Chrome/Firefox (16 bit, 32768 causes an error).
         // Could be calculated by canvas-size module.
         // see #678 on Github and here: https://stackoverflow.com/a/11585939/10295942
@@ -352,27 +355,12 @@ export class OpenSheetMusicDisplay {
                 width = canvasDimensionsLimit;
             }
             if (this.rules.PageFormat && !this.rules.PageFormat.IsUndefined) {
-                height = width / this.rules.PageFormat.aspectRatio;
-                // console.log("pageformat given. height: " + page.PositionAndShape.Size.height);
+                const fixedPageHeight: number = width / this.rules.PageFormat.aspectRatio;
+                // Keep pagination logic, but trim excessive visual whitespace per page for better continuous reading.
+                const contentHeight: number = this.calculatePageContentHeightPx(page, backend);
+                height = Math.min(fixedPageHeight, Math.max(contentHeight + pageFooterHeightPx, 1));
             } else {
-                height = page.PositionAndShape.Size.height;
-                height += this.rules.PageBottomMargin;
-                if (backend.getOSMDBackendType() === BackendType.Canvas) {
-                    height += 0.1; // Canvas bug: cuts off bottom pixel with PageBottomMargin = 0. Doesn't happen with SVG.
-                    //  we could only add 0.1 if PageBottomMargin === 0, but that would mean a margin of 0.1 has no effect compared to 0.
-                }
-                //height += this.rules.CompactMode ? this.rules.PageTopMarginNarrow : this.rules.PageTopMargin;
-                // adding the PageTopMargin with a composer label leads to the margin also added to the bottom of the page
-                height += page.PositionAndShape.BorderTop;
-                // try to respect elements like composer cut off: this gets messy.
-                // if (page.PositionAndShape.BorderTop < 0 && this.rules.PageTopMargin === 0) {
-                //     height += page.PositionAndShape.BorderTop + this.rules.PageTopMargin;
-                // }
-                if (this.rules.RenderTitle) {
-                    height += this.rules.TitleTopDistance;
-                }
-                height *= this.zoom * 10.0;
-                // console.log("pageformat not given. height: " + page.PositionAndShape.Size.height);
+                height = this.calculatePageContentHeightPx(page, backend);
             }
             if (backend.getOSMDBackendType() === BackendType.Canvas && height > canvasDimensionsLimit) {
                 log.warn("[OSMD] Warning: height of " + height + sizeWarningPartTwo);
@@ -384,9 +372,58 @@ export class OpenSheetMusicDisplay {
             backend.clear(); // set bgcolor if defined (this.rules.PageBackgroundColor, see OSMDOptions)
             backend.getContext().setFillStyle(this.rules.DefaultColorMusic);
             backend.getContext().setStrokeStyle(this.rules.DefaultColorMusic); // needs to be set after resize()
+            this.applyPagedContainerDecorations(page, backend);
             this.drawer.Backends.push(backend);
             this.graphic.drawer = this.drawer;
         }
+    }
+
+    private calculatePageContentHeightPx(page: GraphicalMusicPage, backend: VexFlowBackend): number {
+        let height: number = page.PositionAndShape.Size.height;
+        height += this.rules.PageBottomMargin;
+        if (backend.getOSMDBackendType() === BackendType.Canvas) {
+            height += 0.1; // Canvas bug: cuts off bottom pixel with PageBottomMargin = 0. Doesn't happen with SVG.
+        }
+        // adding the PageTopMargin with a composer label leads to the margin also added to the bottom of the page
+        height += page.PositionAndShape.BorderTop;
+        if (this.rules.RenderTitle) {
+            height += this.rules.TitleTopDistance;
+        }
+        return height * this.zoom * 10.0;
+    }
+
+    private applyPagedContainerDecorations(page: GraphicalMusicPage, backend: VexFlowBackend): void {
+        const pageContainer: HTMLElement = backend.getInnerElement();
+        if (!pageContainer) {
+            return;
+        }
+
+        const isPagedLayout: boolean = !!this.rules.PageFormat && !this.rules.PageFormat.IsUndefined;
+        pageContainer.style.position = "relative";
+        pageContainer.style.marginBottom = isPagedLayout ? `${this.pagedPageSpacing}px` : "0px";
+
+        const existingFooter: HTMLElement = pageContainer.querySelector(".osmd-page-footer");
+        if (existingFooter) {
+            existingFooter.remove();
+        }
+        if (!isPagedLayout || !this.drawPageNumberAtFooter) {
+            return;
+        }
+
+        const footer: HTMLDivElement = document.createElement("div");
+        footer.className = "osmd-page-footer";
+        footer.textContent = `${page.PageNumber}`;
+        footer.style.position = "absolute";
+        footer.style.left = "0";
+        footer.style.right = "0";
+        footer.style.bottom = "6px";
+        footer.style.textAlign = "center";
+        footer.style.fontSize = "12px";
+        footer.style.lineHeight = "1";
+        footer.style.opacity = "0.75";
+        footer.style.pointerEvents = "none";
+        footer.style.userSelect = "none";
+        pageContainer.appendChild(footer);
     }
 
     // for now SVG only, see generateImages_browserless (PNG/SVG)
@@ -646,6 +683,12 @@ export class OpenSheetMusicDisplay {
         }
         if (options.pageFormat !== undefined) { // only change this option if it was given, see above
             this.setPageFormat(options.pageFormat);
+        }
+        if (options.pagedPageSpacing !== undefined) {
+            this.pagedPageSpacing = Math.max(0, options.pagedPageSpacing);
+        }
+        if (options.drawPageNumberAtFooter !== undefined) {
+            this.drawPageNumberAtFooter = options.drawPageNumberAtFooter;
         }
         if (options.pageBackgroundColor !== undefined) {
             this.rules.PageBackgroundColor = options.pageBackgroundColor;

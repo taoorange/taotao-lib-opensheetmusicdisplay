@@ -161,6 +161,10 @@ export interface IOSMDOptions {
      *  Unfortunately it would be error-prone to set a PageFormat type directly.
      */
     pageFormat?: string;
+    /** Spacing between paged containers, in px. Default 8. */
+    pagedPageSpacing?: number;
+    /** Draw page number centered at the bottom of each paged container. Default true. */
+    drawPageNumberAtFooter?: boolean;
     /** A custom page/canvas background color. Default undefined/transparent.
      *  Example: "#FFFFFF" = white. "#12345600" = transparent.
      *  This can be useful when you want to export an image with e.g. white background color
