@@ -21,10 +21,12 @@ import { AbstractExpression } from "../MusicalScore/VoiceData/Expressions/Abstra
 import { Dictionary } from "typescript-collections";
 import { AutoColorSet } from "../MusicalScore/Graphical/DrawingEnums";
 import { GraphicalMusicPage } from "../MusicalScore/Graphical/GraphicalMusicPage";
+import { OsmdPageMeasureListIndexBounds } from "./PageMeasureListIndexBounds";
 import { MusicPartManagerIterator } from "../MusicalScore/MusicParts/MusicPartManagerIterator";
 import { ITransposeCalculator } from "../MusicalScore/Interfaces/ITransposeCalculator";
 import { NoteEnum } from "../Common/DataObjects/Pitch";
 import { TemposCalculator } from "../MusicalScore/ScoreIO/MusicSymbolModules/TemposCalculator";
+import { SourceMeasure } from "../MusicalScore/VoiceData/SourceMeasure";
 
 /**
  * The main class and control point of OpenSheetMusicDisplay.<br>
@@ -1109,6 +1111,59 @@ export class OpenSheetMusicDisplay {
     public get GraphicSheet(): GraphicalMusicSheet {
         return this.graphic;
     }
+
+    /**
+     * After load() and render(), returns each drawn page's inclusive range of
+     * global source-measure indices (`SourceMeasure.measureListIndex`, 0-based)
+     * for every graphical measure on that page. Order matches {@link GraphicalMusicSheet.MusicPages}.
+     * Use this to map host UI page numbers ↔ MusicXML measure order (e.g. annotations, export).
+     */
+    public getPageMeasureListIndexBounds(): OsmdPageMeasureListIndexBounds[] {
+        const graphic: GraphicalMusicSheet = this.graphic;
+        if (!graphic?.MusicPages?.length) {
+            return [];
+        }
+        const out: OsmdPageMeasureListIndexBounds[] = [];
+        const maxPage: number = this.rules.MaxPageToDrawNumber;
+        for (const page of graphic.MusicPages) {
+            if (page.PageNumber > maxPage) {
+                break;
+            }
+            let minIdx: number = Number.POSITIVE_INFINITY;
+            let maxIdx: number = -1;
+            for (const system of page.MusicSystems) {
+                if (!system) {
+                    continue;
+                }
+                for (const measureRow of system.GraphicalMeasures) {
+                    if (!measureRow) {
+                        continue;
+                    }
+                    for (const gMeasure of measureRow) {
+                        const sm: SourceMeasure | undefined = gMeasure?.parentSourceMeasure;
+                        if (!sm) {
+                            continue;
+                        }
+                        const idx: number = sm.measureListIndex;
+                        if (typeof idx === "number" && isFinite(idx)) {
+                            minIdx = Math.min(minIdx, idx);
+                            maxIdx = Math.max(maxIdx, idx);
+                        }
+                    }
+                }
+            }
+            if (!isFinite(minIdx) || maxIdx < 0) {
+                return [];
+            }
+            out.push({
+                pageNumber: page.PageNumber,
+                startMeasureListIndex: minIdx,
+                endMeasureListIndex: maxIdx,
+            });
+        }
+        return out;
+    }
+
     public get DrawingParameters(): DrawingParameters {
         return this.drawingParameters;
     }
