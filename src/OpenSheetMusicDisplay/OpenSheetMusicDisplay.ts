@@ -2,6 +2,7 @@ import { IXmlElement } from "./../Common/FileIO/Xml";
 import { VexFlowMusicSheetCalculator } from "./../MusicalScore/Graphical/VexFlow/VexFlowMusicSheetCalculator";
 import { VexFlowBackend } from "./../MusicalScore/Graphical/VexFlow/VexFlowBackend";
 import { MusicSheetReader } from "./../MusicalScore/ScoreIO/MusicSheetReader";
+import { BoundingBox } from "./../MusicalScore/Graphical/BoundingBox";
 import { GraphicalMusicSheet } from "./../MusicalScore/Graphical/GraphicalMusicSheet";
 import { MusicSheetCalculator } from "./../MusicalScore/Graphical/MusicSheetCalculator";
 import { VexFlowMusicSheetDrawer } from "./../MusicalScore/Graphical/VexFlow/VexFlowMusicSheetDrawer";
@@ -21,6 +22,7 @@ import { AbstractExpression } from "../MusicalScore/VoiceData/Expressions/Abstra
 import { Dictionary } from "typescript-collections";
 import { AutoColorSet } from "../MusicalScore/Graphical/DrawingEnums";
 import { GraphicalMusicPage } from "../MusicalScore/Graphical/GraphicalMusicPage";
+import { OsmdMeasureHorizontalSpan, OsmdPageMeasureHorizontalLayout } from "./PageMeasureHorizontalLayout";
 import { OsmdPageMeasureListIndexBounds } from "./PageMeasureListIndexBounds";
 import { MusicPartManagerIterator } from "../MusicalScore/MusicParts/MusicPartManagerIterator";
 import { ITransposeCalculator } from "../MusicalScore/Interfaces/ITransposeCalculator";
@@ -1159,6 +1161,73 @@ export class OpenSheetMusicDisplay {
                 pageNumber: page.PageNumber,
                 startMeasureListIndex: minIdx,
                 endMeasureListIndex: maxIdx,
+            });
+        }
+        return out;
+    }
+
+    /**
+     * After load() and render(), returns each drawn page's list of source measures with
+     * horizontal spans (union over all staves on that page), sorted left to right.
+     * Coordinates match the graphical layout used for SVG output on that page.
+     *
+     * Host apps can align these spans with each page root SVG's {@link SVGGraphicsElement.getBBox}
+     * to map viewport clicks (0–1 over ink width) to `measureListIndex` without assuming
+     * equal width per measure within a page.
+     */
+    public getPageMeasureHorizontalLayouts(): OsmdPageMeasureHorizontalLayout[] {
+        const graphic: GraphicalMusicSheet = this.graphic;
+        if (!graphic?.MusicPages?.length) {
+            return [];
+        }
+        const out: OsmdPageMeasureHorizontalLayout[] = [];
+        const maxPage: number = this.rules.MaxPageToDrawNumber;
+        for (const page of graphic.MusicPages) {
+            if (page.PageNumber > maxPage) {
+                break;
+            }
+            const byIndex: Map<number, { minL: number, maxR: number }> = new Map();
+            for (const system of page.MusicSystems) {
+                if (!system) {
+                    continue;
+                }
+                for (const measureRow of system.GraphicalMeasures) {
+                    if (!measureRow) {
+                        continue;
+                    }
+                    for (const gMeasure of measureRow) {
+                        if (!gMeasure) {
+                            continue;
+                        }
+                        const sm: SourceMeasure | undefined = gMeasure.parentSourceMeasure;
+                        if (!sm || typeof sm.measureListIndex !== "number" || !isFinite(sm.measureListIndex)) {
+                            continue;
+                        }
+                        const idx: number = sm.measureListIndex;
+                        const box: BoundingBox = gMeasure.PositionAndShape;
+                        const edgeL: number = box.AbsolutePosition.x + box.BorderLeft;
+                        const edgeR: number = box.AbsolutePosition.x + box.BorderRight;
+                        const left: number = Math.min(edgeL, edgeR);
+                        const right: number = Math.max(edgeL, edgeR);
+                        const cur: { minL: number, maxR: number } | undefined = byIndex.get(idx);
+                        if (!cur) {
+                            byIndex.set(idx, { minL: left, maxR: right });
+                        } else {
+                            cur.minL = Math.min(cur.minL, left);
+                            cur.maxR = Math.max(cur.maxR, right);
+                        }
+                    }
+                }
+            }
+            const measures: OsmdMeasureHorizontalSpan[] = Array.from(byIndex.entries())
+                .map(([measureListIndex, e]) => ({ measureListIndex, left: e.minL, right: e.maxR }))
+                .sort((a, b) => (a.left !== b.left ? a.left - b.left : a.measureListIndex - b.measureListIndex));
+            if (!measures.length) {
+                return [];
+            }
+            out.push({
+                pageNumber: page.PageNumber,
+                measures,
             });
         }
         return out;

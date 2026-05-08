@@ -3,5 +3,6 @@
 export * from "./AJAX";
 export * from "./Cursor";
 export * from "./OSMDOptions";
+export * from "./PageMeasureHorizontalLayout";
 export * from "./PageMeasureListIndexBounds";
 export * from "./OpenSheetMusicDisplay";
