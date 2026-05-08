@@ -1,3 +1,4 @@
+**npm（本 fork 发布页）：** [https://www.npmjs.com/package/@taotao-lib/opensheetmusicdisplay](https://www.npmjs.com/package/@taotao-lib/opensheetmusicdisplay)
 
 <!--img alt="Brought to you by PhonicScore" src="https://phonicscore.com/neu/wp-content/uploads/2018/06/phonicscore_brown.svg"/-->
 
