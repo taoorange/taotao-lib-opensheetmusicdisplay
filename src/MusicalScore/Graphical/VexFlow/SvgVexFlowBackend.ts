@@ -195,6 +195,12 @@ export class SvgVexFlowBackend extends VexFlowBackend {
         if (isSlur && startNote) {
             slurId = `${startNote.getSVGId()}-slur`;
         }
+        // Guard against NaN values that could produce invalid SVG path data
+        for (const point of points) {
+            if (isNaN(point.x) || isNaN(point.y)) {
+                return undefined;
+            }
+        }
         const node: Node = this.ctx.openGroup("curve", slurId);
         this.ctx.beginPath();
         this.ctx.moveTo(points[0].x, points[0].y);

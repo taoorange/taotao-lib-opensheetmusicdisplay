@@ -146,7 +146,10 @@ export class GraphicalSlur extends GraphicalCurve {
             }
 
             // Angle between original x-Axis and Line from Start-Point to End-Point
-            const startEndLineAngleRadians: number = (Math.atan((endY - startY) / (endX - startX)));
+            const endXStartXDifference: number = endX - startX;
+            const startEndLineAngleRadians: number = endXStartXDifference !== 0
+                ? Math.atan((endY - startY) / endXStartXDifference)
+                : (endY - startY > 0 ? Math.PI / 2 : -Math.PI / 2);
 
             // translate origin at Start (positiveY from Bottom to Top => change sign for Y)
             const start2: PointF2D = new PointF2D(0, 0);
@@ -319,7 +322,10 @@ export class GraphicalSlur extends GraphicalCurve {
             }
 
             // Angle between original x-Axis and Line from Start-Point to End-Point
-            const startEndLineAngleRadians: number = Math.atan((endY - startY) / (endX - startX));
+            const endXStartXDifference: number = endX - startX;
+            const startEndLineAngleRadians: number = endXStartXDifference !== 0
+                ? Math.atan((endY - startY) / endXStartXDifference)
+                : (endY - startY > 0 ? Math.PI / 2 : -Math.PI / 2);
             // translate origin at Start
             const start2: PointF2D = new PointF2D(0, 0);
             let end2: PointF2D = new PointF2D(endX - startX, endY - startY);
@@ -814,11 +820,18 @@ export class GraphicalSlur extends GraphicalCurve {
             if (Math.abs(points[i].y - Number.MAX_VALUE) < 0.0001 || Math.abs(points[i].y - (-Number.MAX_VALUE)) < 0.0001) {
                 continue;
             }
-            slope = Math.max(slope, (points[i].y - y) / (points[i].x - x));
+            const denominator: number = points[i].x - x;
+            if (Math.abs(denominator) < 0.00001) {
+                continue;
+            }
+            slope = Math.max(slope, (points[i].y - y) / denominator);
         }
 
         // in case all Points don't have a meaningful value or the slope between Start- and EndPoint is just bigger
-        slope = Math.max(slope, Math.abs(end.y - y) / (end.x - x));
+        const endDenominator: number = end.x - x;
+        if (Math.abs(endDenominator) > 0.00001) {
+            slope = Math.max(slope, Math.abs(end.y - y) / endDenominator);
+        }
         //limit to 80 degrees
         slope = Math.min(slope, 5.6713);
 
@@ -840,11 +853,18 @@ export class GraphicalSlur extends GraphicalCurve {
             if (Math.abs(points[i].y - Number.MAX_VALUE) < 0.0001 || Math.abs(points[i].y - (-Number.MAX_VALUE)) < 0.0001) {
                 continue;
             }
-            slope = Math.min(slope, (y - points[i].y) / (x - points[i].x));
+            const denominator: number = x - points[i].x;
+            if (Math.abs(denominator) < 0.00001) {
+                continue;
+            }
+            slope = Math.min(slope, (y - points[i].y) / denominator);
         }
 
         // in case no Point has a meaningful value or the slope between Start- and EndPoint is just smaller
-        slope = Math.min(slope, (y - start.y) / (x - start.x));
+        const startDenominator: number = x - start.x;
+        if (Math.abs(startDenominator) > 0.00001) {
+            slope = Math.min(slope, (y - start.y) / startDenominator);
+        }
         //limit to 80 degrees
         slope = Math.max(slope, -5.6713);
 
@@ -919,7 +939,7 @@ export class GraphicalSlur extends GraphicalCurve {
      * @param points
      */
     private calculateHeightWidthRatio(endX: number, points: PointF2D[]): number {
-        if (points.length === 0) {
+        if (points.length === 0 || endX === 0) {
             return 0;
         }
 
@@ -1008,18 +1028,28 @@ export class GraphicalSlur extends GraphicalCurve {
         // calculate Angles from the calculated Slopes, adding also a given angle
         const angle: number = 20;
 
-        let calculatedStartAngle: number = Math.atan(startLineSlope) / GraphicalSlur.degreesToRadiansFactor;
-        if (startLineSlope > 0) {
-            calculatedStartAngle += angle;
+        let calculatedStartAngle: number;
+        if (isNaN(startLineSlope) || !isFinite(startLineSlope)) {
+            calculatedStartAngle = minAngle;
         } else {
-            calculatedStartAngle -= angle;
+            calculatedStartAngle = Math.atan(startLineSlope) / GraphicalSlur.degreesToRadiansFactor;
+            if (startLineSlope > 0) {
+                calculatedStartAngle += angle;
+            } else {
+                calculatedStartAngle -= angle;
+            }
         }
 
-        let calculatedEndAngle: number = Math.atan(endLineSlope) / GraphicalSlur.degreesToRadiansFactor;
-        if (endLineSlope < 0) {
-            calculatedEndAngle -= angle;
+        let calculatedEndAngle: number;
+        if (isNaN(endLineSlope) || !isFinite(endLineSlope)) {
+            calculatedEndAngle = -minAngle;
         } else {
-            calculatedEndAngle += angle;
+            calculatedEndAngle = Math.atan(endLineSlope) / GraphicalSlur.degreesToRadiansFactor;
+            if (endLineSlope < 0) {
+                calculatedEndAngle -= angle;
+            } else {
+                calculatedEndAngle += angle;
+            }
         }
 
         // +/- 80 is the max/min allowed Angle

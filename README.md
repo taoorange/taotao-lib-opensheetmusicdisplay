@@ -199,3 +199,68 @@ To contact us directly, you can:
 
 - 水平区间依赖当前 **SVG/Canvas 后端** 与排版结果；若宿主使用与 OSMD 渲染时不同的缩放或重新套版，需自行重新换算或重新 `render()` 后再取布局。  
 - `getPageMeasureHorizontalLayouts` 与 `getPageMeasureListIndexBounds` 在「单页数据异常」时均可能返回 **空数组**；宿主 **不可** 在长度不匹配时退而误用「全曲按页均分」而不加校验，否则会回到旧有锚点偏差问题。
+
+---
+
+## 已修复问题：Slur 渲染 NaN 导致 SVG path 报错
+
+### 现象
+
+打开含有圆滑连线（slur）的 MusicXML 文件（如 `春之声1-音乐学院带有标记_1778326139378.musicxml`）时，浏览器控制台大量报错：
+
+```
+Error: <path> attribute d: Expected number, "…54.523833824256CNaN NaN,NaN NaN,…".
+```
+
+即 OSMD 生成的 SVG `<path>` 元素的 `d` 属性中出现了 `NaN`，导致连线图形无法正常渲染，控制台刷屏报错。
+
+### 出错元素
+
+**Slur（圆滑连线）**。该文件由 Sibelius 导出，包含多段 slur 标注（`<slur type="start" orientation="over"/>` / `<slur type="stop" orientation="over"/>`）。OSMD 在计算 slur 贝塞尔曲线控制点时，某些边界条件下触发除零错误，导致控制点坐标变为 `NaN`，最终经 `SvgVexFlowBackend.renderCurve()` 写入 SVG path 的 `d` 属性。
+
+### 根因分析
+
+NaN 的产生链路如下：
+
+```
+斜率计算 (x÷0 → NaN)
+  → Math.atan(NaN) → 角度 (NaN)
+    → Math.cos/sin(NaN) → 控制点坐标 (NaN)
+      → bezierStartPt / bezierEndPt / bezierCurveTo(…)
+        → SVG path d 属性中包含 "CNaN NaN"
+```
+
+具体触发点在 `GraphicalSlur.ts` 中：
+
+| 位置 | 问题描述 |
+|------|----------|
+| `calculateMaxLeftSlope` | 坐标变换后起点为 `(0, 0)`，若天际线某点的 `x === 0`，则 `points[i].y / points[i].x` 得到 `0/0 = NaN` |
+| `calculateMaxRightSlope` | 若某点 `x === end2.x`，则 `(y - points[i].y) / (end2.x - points[i].x)` 分母为零产生 NaN |
+| `Math.atan` (第149行 / 第322行) | 当 `endX === startX` 时，`(endY - startY) / 0` 若分子也为 0 则 `0/0 = NaN` |
+| `calculateHeightWidthRatio` | 当 `endX === 0` 且 `max === 0` 时 `0/0 = NaN` |
+| `calculateAngles` | 上游 NaN 斜率传入 `Math.atan(NaN)` 进一步传播 |
+
+### 修改的文件
+
+#### 1. `src/MusicalScore/Graphical/GraphicalSlur.ts`
+
+共 **6 处修复**：
+
+| 方法 | 修复方式 |
+|------|----------|
+| `calculateMaxLeftSlope` | 对每个天际线点，若 `denominator = points[i].x - x` 的绝对值小于 `1e-5` 则跳过；终点分母同样加保护 |
+| `calculateMaxRightSlope` | 同上：对每个点检查 `x - points[i].x` 是否接近零，起点分母同样加保护 |
+| `Math.atan` (Above 分支, ≈149行) | 显式检查 `endXStartXDifference !== 0`，为零时直接取 `±π/2` |
+| `Math.atan` (Below 分支, ≈322行) | 同上 |
+| `calculateHeightWidthRatio` | 条件 `endX === 0` 时直接返回 0 |
+| `calculateAngles` | 在 `Math.atan()` 调用前检查 `isNaN()` / `!isFinite()`，若无效则回落至 `minAngle` / `-minAngle` 安全值 |
+
+#### 2. `src/MusicalScore/Graphical/VexFlow/SvgVexFlowBackend.ts`
+
+在 `renderCurve()` 方法开头增加**防御层**：遍历所有 8 个控制点，若任一坐标 `isNaN()` 则直接 `return undefined`，避免生成无效 SVG 元素。
+
+### 验证结果
+
+- TypeScript 编译：通过
+- 全部 195 个单元测试：通过
+- Webpack 生产构建：成功
