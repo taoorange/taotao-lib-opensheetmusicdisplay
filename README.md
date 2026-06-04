@@ -31,10 +31,9 @@
 
 ## Upstream Source and Local Changes
 
-This repository is based on the upstream OpenSheetMusicDisplay project:
-[`https://github.com/opensheetmusicdisplay/opensheetmusicdisplay`](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay).
+本仓库 fork 自上游 [OpenSheetMusicDisplay](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay)，代码基线约为上游 **1.9.7**，并以独立 npm 包 **`@taotao-lib/opensheetmusicdisplay`**（当前 **1.0.5**）发布。
 
-For modifications made in this local fork, see the section **[Fork downstream changes](#fork-downstream-changes)** at the end of this README (the previously referenced `LOCAL_CHANGES_SUMMARY.md` is not maintained separately).
+与上游相比，**未改动 MusicXML 解析与 VexFlow 绘制主流程**；二次封装集中在：**npm 重发布**、**分页布局查询 API**（供宿主标注 / `<direction>` 导出对齐）、**分页渲染体验**、**乐器名显示**、**Slur NaN 修复**、**Demo 本地调试**。完整说明见 **[二次封装说明](#fork-downstream-changes)**。
 
 ## About OSMD
 
@@ -157,52 +156,103 @@ To contact us directly, you can:
 
 ## Fork downstream changes
 
-（本段为 **二次开发说明**，中文撰写。）本仓库在 [OpenSheetMusicDisplay](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay) 上游基础上做了 **与宿主乐谱应用（如 five-line-staff）对接** 的扩展：在 **分页渲染完成后** 暴露「每页对应哪些全局小节」以及「每页内各小节在版面上的水平区间」，用于 **视口点击 / 标注锚点 / 导出 MusicXML 时与屏上谱面一致**，避免仅用「总页数均分全曲小节」导致的错位。
+（本段为 **二次封装说明**，中文撰写。）
 
-### 1. 新增类型（`src/OpenSheetMusicDisplay/`）
+### 与上游 `opensheetmusicdisplay` 的差异概览
 
-| 文件 | 说明 |
-|------|------|
-| `PageMeasureListIndexBounds.ts` | `OsmdPageMeasureListIndexBounds`：单页上 `measureListIndex` 的闭区间 `[startMeasureListIndex, endMeasureListIndex]`（0-based，与 `SourceMeasure.measureListIndex` 一致）。 |
-| `PageMeasureHorizontalLayout.ts` | `OsmdMeasureHorizontalSpan`（单小节 `measureListIndex` + `left`/`right` 绘图坐标）、`OsmdPageMeasureHorizontalLayout`（单页 + 该页上所有不重复小节的 span 列表，已按从左到右排序）。 |
-
-包入口 `src/OpenSheetMusicDisplay/index.ts` 已 **`export *`** 上述模块，发布构建后消费方可从 `@taotao-lib/opensheetmusicdisplay` 引用类型。
-
-### 2. `OpenSheetMusicDisplay` 新增公开方法
-
-#### `getPageMeasureListIndexBounds(): OsmdPageMeasureListIndexBounds[]`
-
-- **时机**：在 `load()` 且 `render()` 完成之后调用。  
-- **语义**：对每个已绘制的 `GraphicalMusicPage`，统计该页上出现的所有图元小节的 `measureListIndex` 的最小值与最大值（含多声部同一小节）。  
-- **顺序**：与 `GraphicalMusicSheet.MusicPages` 一致；受 `EngravingRules.MaxPageToDrawNumber` 约束，超出页不再输出。  
-- **失败行为**：若某一页无法得到有效 min/max，**整表返回 `[]`**（与上游保守策略一致）；宿主应仅在「返回数组长度与自身分页 HTML 页数一致」时使用。
-
-#### `getPageMeasureHorizontalLayouts(): OsmdPageMeasureHorizontalLayout[]`
-
-- **时机**：同上，须在 `render()` 之后。  
-- **语义**：对每一分页，按 `measureListIndex` 去重；同一小节多行谱表取所有 `GraphicalMeasure` 的 **水平并集**（`min(left)`、`max(right)`）。  
-- **坐标**：与排版后 `BoundingBox` 一致，使用公开 getter：`AbsolutePosition.x + BorderLeft` / `+ BorderRight`（**不得**访问受保护的 `borderLeft` / `borderRight` 字段）。对左右边界做 `Math.min` / `Math.max` 规范化，避免极端情况下左右颠倒。  
-- **失败行为**：若某一页没有任何可统计小节，**整表返回 `[]`**；宿主同样应用「长度与页数一致」才采纳。  
-- **宿主侧对齐**：典型用法是将 `left`/`right` 与 **该页根 SVG 的 `getBBox()`** 做线性归一化，使 0–1 横坐标与「墨迹宽度」参照一致（详见 five-line-staff 中 `renderMusicXmlWithOsmdPages` / `pageMeasureInkNormSpans` 逻辑）。
-
-### 3. 与上游的关系
-
-- 未改动 MusicXML 解析与 VexFlow 绘制主流程；仅增加 **只读查询 API** 与类型导出。  
-- 若未来合并上游大版本，需重点解决冲突的文件主要是：`OpenSheetMusicDisplay.ts`、`index.ts` 及上述两个类型文件。
-
-### 4. 版本与发布
-
-- 携带上述 API 的 fork 版本以 **`package.json` 中 `version`** 为准（例如 **1.0.3** 起包含 `getPageMeasureHorizontalLayouts`）。  
-- 发布 npm 前请执行项目内 **`npm run build`**，确保 `build/`（及类型声明 `.d.ts`）包含新导出，否则 TypeScript 消费方无法识别新 API。
-
-### 5. 已知限制
-
-- 水平区间依赖当前 **SVG/Canvas 后端** 与排版结果；若宿主使用与 OSMD 渲染时不同的缩放或重新套版，需自行重新换算或重新 `render()` 后再取布局。  
-- `getPageMeasureHorizontalLayouts` 与 `getPageMeasureListIndexBounds` 在「单页数据异常」时均可能返回 **空数组**；宿主 **不可** 在长度不匹配时退而误用「全曲按页均分」而不加校验，否则会回到旧有锚点偏差问题。
+| 维度 | 上游 `opensheetmusicdisplay` | 本 fork `@taotao-lib/opensheetmusicdisplay` |
+|------|------------------------------|---------------------------------------------|
+| npm 包名 | `opensheetmusicdisplay` | `@taotao-lib/opensheetmusicdisplay` |
+| 版本号 | 当前 master 约 **1.9.9** | 独立版本，当前 **1.0.5**（见 `package.json`） |
+| 代码基线 | — | 基于上游约 **1.9.7** 快照 fork，**未持续跟踪** upstream master |
+| 分页小节映射 API | 无 | `getPageMeasureListIndexBounds` / `getPageMeasureHorizontalLayouts` |
+| 分页容器装饰 | 无 | 页间距、页脚页码、按内容裁剪页高 |
+| 乐器名（非首行） | 无缩写则整段不渲染 | 优先缩写，无缩写时回退全名 |
+| Slur NaN | 部分 MusicXML 会产出无效 SVG path | 已修复 + 后端防御 |
+| Demo 本地文件 / URL 分页 | 上游默认行为 | 增强（见 §6） |
 
 ---
 
-## 已修复问题：Slur 渲染 NaN 导致 SVG path 报错
+### 1. npm 二次发布
+
+- **`package.json`**：`name` 改为 `@taotao-lib/opensheetmusicdisplay`，版本号独立维护（**1.0.5**）。
+- **构建产物不变**：仍为 `build/opensheetmusicdisplay.min.js` + `build/dist/src/**/*.d.ts`，API 与上游兼容并 **增量扩展**。
+- **安装**：`npm install @taotao-lib/opensheetmusicdisplay`（发布页见 README 顶部链接）。
+- **发布前**：须执行 `npm run build`，确保 `build/` 含新类型与方法的 `.d.ts`。
+
+---
+
+### 2. 分页布局查询 API（`<direction>` 标注 / 导出对齐）
+
+**背景**：宿主乐谱应用（如 five-line-staff）需要在分页渲染后，将 UI 标注、MusicXML `<direction>` 导出锚点与 **屏上实际排版** 对齐。若仅用「总页数均分全曲小节」，多声部、换页不规则时会产生错位。
+
+**说明**：此处「direction 标签」指宿主侧对 MusicXML `<direction>` 的标注与导出能力，**并非**修改 OSMD 对 `<direction>` 的解析逻辑；OSMD 仍按上游方式读取 `<direction>` / `<direction-type>`。
+
+#### 2.1 新增类型（`src/OpenSheetMusicDisplay/`）
+
+| 文件 | 说明 |
+|------|------|
+| `PageMeasureListIndexBounds.ts` | `OsmdPageMeasureListIndexBounds`：单页上 `measureListIndex` 闭区间 `[startMeasureListIndex, endMeasureListIndex]`（0-based，与 `SourceMeasure.measureListIndex` 一致）。 |
+| `PageMeasureHorizontalLayout.ts` | `OsmdMeasureHorizontalSpan`（`measureListIndex` + `left`/`right` 绘图坐标）、`OsmdPageMeasureHorizontalLayout`（单页 + 该页不重复小节的 span 列表，已按从左到右排序）。 |
+
+`src/OpenSheetMusicDisplay/index.ts` 已 **`export *`** 上述模块。
+
+#### 2.2 新增公开方法（`OpenSheetMusicDisplay.ts`）
+
+**`getPageMeasureListIndexBounds(): OsmdPageMeasureListIndexBounds[]`**（v1.0.2+）
+
+- **时机**：`load()` 且 `render()` 完成后调用。
+- **语义**：每页统计出现的所有图元小节 `measureListIndex` 的 min/max（含多声部同一小节）。
+- **顺序**：与 `GraphicalMusicSheet.MusicPages` 一致；受 `EngravingRules.MaxPageToDrawNumber` 约束。
+- **失败行为**：任一页无法得到有效 min/max 时 **整表返回 `[]`**；宿主仅在返回长度与 HTML 页数一致时采纳。
+
+**`getPageMeasureHorizontalLayouts(): OsmdPageMeasureHorizontalLayout[]`**（v1.0.3+）
+
+- **时机**：同上。
+- **语义**：每页按 `measureListIndex` 去重；同一小节多谱表取 `GraphicalMeasure` 水平并集 `min(left)` / `max(right)`。
+- **坐标**：`AbsolutePosition.x + BorderLeft` / `+ BorderRight`（使用公开 getter）；左右边界经 `Math.min` / `Math.max` 规范化。
+- **失败行为**：任一页无有效小节时 **整表返回 `[]`**。
+- **宿主对齐**：将 `left`/`right` 与该页根 SVG `getBBox()` 线性归一化为 0–1 横坐标（参考 five-line-staff 中 `renderMusicXmlWithOsmdPages` / `pageMeasureInkNormSpans`）。
+
+#### 2.3 已知限制
+
+- 水平区间依赖当前 SVG/Canvas 后端与排版结果；缩放或重新套版后需重新 `render()` 或自行换算。
+- 两 API 在单页异常时均可能返回空数组；**不可**在长度不匹配时退而「全曲按页均分」。
+
+---
+
+### 3. 分页渲染体验优化
+
+文件：`OpenSheetMusicDisplay.ts`、`OSMDOptions.ts`（v1.0.1+）
+
+| 改动 | 说明 |
+|------|------|
+| **`pagedPageSpacing`** | 分页容器间距（px），默认 **8**。 |
+| **`drawPageNumberAtFooter`** | 是否在每页底部居中绘制页码，默认 **true**。 |
+| **`calculatePageContentHeightPx()`** | 抽取页高计算；有 `PageFormat` 时用 `min(固定页高, 内容高 + 页脚)`，减少分页模式下多余空白。 |
+| **`applyPagedContainerDecorations()`** | 为分页容器设置 `marginBottom`、注入 `.osmd-page-footer` 页码元素。 |
+
+---
+
+### 4. 乐器名显示修复
+
+文件：`src/MusicalScore/Graphical/MusicSystem.ts`
+
+| 改动 | 说明 |
+|------|------|
+| `Dictionary` → `Map` | 标签容器改为 `Map<Instrument, GraphicalLabel>`，避免 `typescript-collections` 的 `Dictionary` 以对象为 key 时的覆盖风险。 |
+| `labels.clear()` | 每次 `createMusicSystemLabel` 前清空，防止残留。 |
+| 按乐器去重 | 同一乐器多 staff 只建一个标签。 |
+| 非首系统逻辑 | 上游：无缩写则 `return` 中断整段循环；fork：**优先 `PartAbbreviation`，无缩写时回退全名**，条件不满足时 `continue` 而非 `return`。 |
+| 配套调整 | `Labels` getter、`maxLabelLength`、`setMusicSystemLabelsYPosition` 适配 `Map`。 |
+
+**效果**：修复乐器名与五线谱重叠/错位，保证每个系统行都有乐器名显示。
+
+---
+
+### 5. Slur 渲染 NaN 修复（v1.0.4+）
+
+#### 现象
 
 ### 现象
 
@@ -264,3 +314,46 @@ NaN 的产生链路如下：
 - TypeScript 编译：通过
 - 全部 195 个单元测试：通过
 - Webpack 生产构建：成功
+
+---
+
+### 6. Demo 开发体验增强
+
+文件：`demo/index.html`、`demo/index.js`、`demo/embedded_demo.html`（详见仓库内 `Secondary-Packaging-Change.md`）
+
+| 改动 | 说明 |
+|------|------|
+| **Open local file** | 新增按钮 + 隐藏 `<input type="file">`，支持 `.xml` / `.musicxml` / `.mxl`。 |
+| **`loadLocalFile()`** | 统一本地加载路径，`.mxl` 走 `osmd.load(File/Blob)` 内部解压，避免 `readAsBinaryString` 兼容问题。 |
+| **URL 分页参数** | `paged=1`（或 `true`）开启分页；`pagedFormat` 指定纸张（默认 `A4_P`）。优先级：`pageWidth+pageHeight` > `pageFormat` > `paged+pagedFormat` > 默认 `Endless`。 |
+
+---
+
+### 7. 变更文件清单与合并上游
+
+**相对上游有改动的源码文件：**
+
+| 文件 | 改动类型 |
+|------|----------|
+| `package.json` | npm 包名 / 版本 |
+| `src/OpenSheetMusicDisplay/OpenSheetMusicDisplay.ts` | 分页 API、分页装饰、页高裁剪 |
+| `src/OpenSheetMusicDisplay/OSMDOptions.ts` | `pagedPageSpacing`、`drawPageNumberAtFooter` |
+| `src/OpenSheetMusicDisplay/PageMeasureListIndexBounds.ts` | **新增** |
+| `src/OpenSheetMusicDisplay/PageMeasureHorizontalLayout.ts` | **新增** |
+| `src/OpenSheetMusicDisplay/index.ts` | 导出新类型 |
+| `src/MusicalScore/Graphical/MusicSystem.ts` | 乐器名 Map / 回退逻辑 |
+| `src/MusicalScore/Graphical/GraphicalSlur.ts` | Slur NaN 修复 |
+| `src/MusicalScore/Graphical/VexFlow/SvgVexFlowBackend.ts` | `renderCurve` 防御 |
+| `demo/index.html`、`demo/index.js`、`demo/embedded_demo.html` | 本地文件 / URL 分页 |
+
+**版本与 API 对应关系：**
+
+| fork 版本 | 主要内容 |
+|-----------|----------|
+| 1.0.1 | 分页装饰（页间距、页脚页码、页高裁剪） |
+| 1.0.2 | `getPageMeasureListIndexBounds` |
+| 1.0.3 | `getPageMeasureHorizontalLayouts` |
+| 1.0.4 | Slur NaN 修复 |
+| 1.0.5 | 当前版本 |
+
+若未来合并上游新版本，冲突高发文件：`OpenSheetMusicDisplay.ts`、`index.ts`、`MusicSystem.ts`、`GraphicalSlur.ts` 及两个 `PageMeasure*.ts`。
